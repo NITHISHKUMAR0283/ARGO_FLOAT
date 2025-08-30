@@ -1,570 +1,408 @@
 import streamlit as st
+import psycopg2
+import pandas as pd
+import matplotlib.pyplot as plt
+import folium
+from streamlit_folium import folium_static
 from groq import Groq
-import time
-import json
-from datetime import datetime
 import re
+from datetime import datetime
 
-# Page configuration
+# Set page configuration
 st.set_page_config(
-    page_title="Groq AI Assistant",
-    page_icon="🚀",
+    page_title="FloatChat - ARGO Data Explorer",
+    page_icon="🌊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Enhanced CSS with modern design
-st.markdown("""
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-    
-    * {
-        font-family: 'Inter', sans-serif;
-    }
-    
-    /* Hide Streamlit default elements */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    .stDeployButton {display:none;}
-    
-    /* Main container styling */
-    .main .block-container {
-        padding-top: 1rem;
-        padding-bottom: 1rem;
-        max-width: 1200px;
-    }
-    
-    /* Header with gradient */
-    .main-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 2rem;
-        border-radius: 20px;
-        text-align: center;
-        margin-bottom: 2rem;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-        color: white;
-    }
-    
-    .main-header h1 {
-        font-size: 3rem;
-        font-weight: 700;
-        margin: 0;
-        text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-        background: linear-gradient(45deg, #fff, #f0f8ff);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-    }
-    
-    .main-header p {
-        font-size: 1.2rem;
-        margin: 0.5rem 0 0 0;
-        opacity: 0.9;
-    }
-    
-    /* Chat container with glassmorphism */
-    .chat-container {
-        background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(10px);
-        border-radius: 20px;
-        padding: 1.5rem;
-        margin-bottom: 2rem;
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        min-height: 500px;
-        max-height: 600px;
-        overflow-y: auto;
-    }
-    
-    /* Message bubbles with animations */
-    .message-bubble {
-        margin: 1rem 0;
-        animation: fadeInUp 0.5s ease-out;
-        max-width: 85%;
-        word-wrap: break-word;
-    }
-    
-    @keyframes fadeInUp {
-        from {
-            opacity: 0;
-            transform: translateY(20px);
-        }
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
-    }
-    
-    .user-bubble {
-        margin-left: auto;
-        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-        color: white;
-        padding: 1rem 1.5rem;
-        border-radius: 25px 25px 5px 25px;
-        box-shadow: 0 5px 15px rgba(79, 172, 254, 0.3);
-        position: relative;
-    }
-    
-    .user-bubble::before {
-        content: "👤";
-        position: absolute;
-        top: -10px;
-        right: 10px;
-        background: white;
-        width: 30px;
-        height: 30px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 0.8rem;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    }
-    
-    .bot-bubble {
-        background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
-        color: #333;
-        padding: 1rem 1.5rem;
-        border-radius: 25px 25px 25px 5px;
-        box-shadow: 0 5px 15px rgba(250, 112, 154, 0.3);
-        position: relative;
-    }
-    
-    .bot-bubble::before {
-        content: "🤖";
-        position: absolute;
-        top: -10px;
-        left: 10px;
-        background: white;
-        width: 30px;
-        height: 30px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 0.8rem;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    }
-    
-    /* Sidebar enhancement */
-    .sidebar .sidebar-content {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 1.5rem;
-        border-radius: 15px;
-        margin-bottom: 1rem;
-        box-shadow: 0 8px 25px rgba(0,0,0,0.15);
-    }
-    
-    /* Welcome screen */
-    
-    
-    .welcome-screen h2 {
-        font-size: 2.5rem;
-        margin-bottom: 1rem;
-        font-weight: 600;
-    }
-    
-    .welcome-screen p {
-        font-size: 1.1rem;
-        opacity: 0.9;
-        margin-bottom: 0.5rem;
-    }
-    
-    /* Typing indicator */
-    .typing-indicator {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 1rem;
-        color: #666;
-        font-style: italic;
-    }
-    
-    .typing-dots {
-        display: flex;
-        gap: 3px;
-    }
-    
-    .typing-dots span {
-        width: 6px;
-        height: 6px;
-        background: #667eea;
-        border-radius: 50%;
-        animation: typing 1.4s infinite ease-in-out;
-    }
-    
-    .typing-dots span:nth-child(1) { animation-delay: -0.32s; }
-    .typing-dots span:nth-child(2) { animation-delay: -0.16s; }
-    
-    @keyframes typing {
-        0%, 80%, 100% { transform: scale(0.8); opacity: 0.5; }
-        40% { transform: scale(1); opacity: 1; }
-    }
-    
-    /* Stats cards */
-    .stats-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 1rem;
-        border-radius: 15px;
-        margin: 0.5rem 0;
-        text-align: center;
-        box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-    }
-    
-    .stats-number {
-        font-size: 2rem;
-        font-weight: 700;
-        display: block;
-    }
-    
-    .stats-label {
-        font-size: 0.9rem;
-        opacity: 0.8;
-    }
-    
-    /* Model selector enhancement */
-    .model-card {
-        background: rgba(255, 255, 255, 0.1);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        border-radius: 10px;
-        padding: 0.8rem;
-        margin: 0.5rem 0;
-        backdrop-filter: blur(10px);
-    }
-    
-    /* Input styling */
-    .stTextInput > div > div > input {
-        border-radius: 25px;
-        border: 2px solid #667eea;
-        padding: 0.75rem 1.5rem;
-        font-size: 1rem;
-    }
-    
-    .stTextInput > div > div > input:focus {
-        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-    }
-    
-    /* Button enhancements */
-    .stButton > button {
-        border-radius: 25px;
-        border: none;
-        padding: 0.75rem 2rem;
-        font-weight: 600;
-        transition: all 0.3s ease;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-    }
-    
-    .stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 8px 25px rgba(0,0,0,0.15);
-    }
-    
-    /* Footer */
-    .footer {
-        text-align: center;
-        padding: 2rem;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border-radius: 15px;
-        margin-top: 2rem;
-    }
-    
-    /* Dark mode toggle */
-    .theme-toggle {
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        z-index: 1000;
-        background: rgba(255, 255, 255, 0.2);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.3);
-        border-radius: 50px;
-        padding: 0.5rem;
-    }
-</style>
-""", unsafe_allow_html=True)
+# Initialize the Groq client
+client = Groq(api_key="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")
 
-# Initialize session state with enhanced features
-if 'messages' not in st.session_state:
-    st.session_state.messages = []
-
-if 'api_key' not in st.session_state:
-    st.session_state.api_key = "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"
-
-if 'message_count' not in st.session_state:
-    st.session_state.message_count = 0
-
-if 'session_start' not in st.session_state:
-    st.session_state.session_start = datetime.now()
-
-if 'favorite_model' not in st.session_state:
-    st.session_state.favorite_model = "llama3-8b-8192"
-
-# Enhanced Sidebar
-with st.sidebar:
-    st.markdown("""
-    <div class="sidebar-content">
-        <h2>🚀 AI Control Center</h2>
-        <p>Customize your AI experience</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # API Key Section
-    st.markdown("### 🔑 API Configuration")
-    api_key = st.text_input(
-        "Groq API Key", 
-        value=st.session_state.api_key,
-        type="password",
-        help="🔗 Get your free key at console.groq.com"
-    )
-    st.session_state.api_key = api_key
-    
-    if api_key:
-        st.success("✅ API Key Connected")
-    else:
-        st.error("❌ API Key Required")
-    
-    st.markdown("---")
-    
-    # Model Selection with descriptions
-    st.markdown("### 🧠 AI Model Selection")
-    
-    model_info = {
-        "llama3-8b-8192": {
-            "name": "🦙 Llama 3 8B",
-            "desc": "Fast & Efficient",
-            "strength": "⚡ Speed",
-            "color": "#4CAF50"
-        },
-        "llama3-70b-8192": {
-            "name": "🦙 Llama 3 70B", 
-            "desc": "Most Powerful",
-            "strength": "💪 Intelligence",
-            "color": "#2196F3"
-        },
-        "mixtral-8x7b-32768": {
-            "name": "🌟 Mixtral 8x7B",
-            "desc": "Creative & Diverse",
-            "strength": "🎨 Creativity", 
-            "color": "#FF9800"
-        },
-        "gemma-7b-it": {
-            "name": "💎 Gemma 7B",
-            "desc": "Google's Model",
-            "strength": "🎯 Accuracy",
-            "color": "#9C27B0"
-        }
-    }
-    
-    selected_model = st.selectbox(
-        "Choose your AI companion",
-        options=list(model_info.keys()),
-        format_func=lambda x: f"{model_info[x]['name']} - {model_info[x]['desc']}",
-        index=0
-    )
-    
-    # Model info card
-    current_model = model_info[selected_model]
-    st.markdown(f"""
-    <div class="model-card">
-        <h4>{current_model['name']}</h4>
-        <p><strong>Specialty:</strong> {current_model['desc']}</p>
-        <p><strong>Best for:</strong> {current_model['strength']}</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
-    # Advanced Settings
-    st.markdown("### ⚙️ Response Settings")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        temperature = st.slider(
-            "🌡️ Creativity",
-            min_value=0.0,
-            max_value=2.0,
-            value=0.7,
-            step=0.1
+# Database connection function
+def get_db_connection():
+    try:
+        conn = psycopg2.connect(
+            "postgresql://neondb_owner:npg_qV9a3dQRAeBm@ep-still-field-a17hi4xm-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
         )
-    
-    with col2:
-        max_tokens = st.slider(
-            "📏 Length",
-            min_value=100,
-            max_value=4000,
-            value=1000,
-            step=100
-        )
-    
-    # System prompt
-    st.markdown("### 📝 System Instructions")
-    system_prompt = st.text_area(
-        "Customize AI behavior",
-        value="You are a helpful, friendly, and knowledgeable AI assistant.",
-        height=100
-    )
-    
-    st.markdown("---")
-    
-    # Session Stats
-    st.markdown("### 📊 Session Stats")
-    
-    session_time = datetime.now() - st.session_state.session_start
-    hours, remainder = divmod(session_time.seconds, 3600)
-    minutes, _ = divmod(remainder, 60)
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown(f"""
-        <div class="stats-card">
-            <span class="stats-number">{st.session_state.message_count}</span>
-            <span class="stats-label">Messages</span>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown(f"""
-        <div class="stats-card">
-            <span class="stats-number">{hours}h {minutes}m</span>
-            <span class="stats-label">Session Time</span>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
-    # Action Buttons
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🗑️ Clear Chat", type="secondary"):
-            st.session_state.messages = []
-            st.session_state.message_count = 0
-            st.rerun()
-    
-    with col2:
-        if st.button("💾 Export Chat"):
-            if st.session_state.messages:
-                chat_export = {
-                    "timestamp": datetime.now().isoformat(),
-                    "model": selected_model,
-                    "messages": st.session_state.messages,
-                    "settings": {
-                        "temperature": temperature,
-                        "max_tokens": max_tokens,
-                        "system_prompt": system_prompt
-                    }
-                }
-                st.download_button(
-                    "📥 Download JSON",
-                    data=json.dumps(chat_export, indent=2),
-                    file_name=f"groq_chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                    mime="application/json"
-                )
+        return conn
+    except Exception as e:
+        st.error(f"Error connecting to database: {e}")
+        return None
 
-# Main Content Area
+# System prompt for the LLM
+system_prompt = """
+You are FloatChat, an AI-powered conversational agent for ARGO ocean data exploration and visualization. 
+You are connected to a PostgreSQL database with the schema:
 
+Table: argo_floats
+Columns:
+- id (int, primary key)
+- platform_number (varchar): unique float identifier
+- cycle_number (int): profile cycle number
+- measurement_time (timestamp): date & time of observation
+- latitude (double precision)
+- longitude (double precision)
+- pressure (double precision): depth in decibars
+- temperature (double precision): temperature (°C)
+- salinity (double precision): salinity (PSU)
+- data_quality (varchar)
+- region (varchar, default 'Indian Ocean')
+- data_source (varchar)
+- created_at (timestamp)
 
-# Check API key
-if not api_key:
-    
-    st.stop()
+Your role:
+1. Take user questions in natural language.
+2. Translate them into valid SQL queries on the `argo_floats` table.
+3. If the query requires spatial/temporal filtering, use latitude, longitude, and measurement_time.
+4. Always limit results for readability (e.g., LIMIT 100) unless the user requests full output.
+5. Provide the answer in natural language, followed by tabular results. 
+6. If the question asks for visualization:
+   - For trends over time → return a line plot (time vs variable).
+   - For spatial patterns → return a map scatter (lat vs lon).
+   - For vertical profiles (pressure vs temperature/salinity) → return depth plots.
+7. If the user asks vague questions, guide them by suggesting possible queries.
 
-# Initialize Groq client
-try:
-    client = Groq(api_key=api_key)
-except Exception as e:
-    st.error(f"❌ Connection failed: {str(e)}")
-    st.info("💡 Please check your API key and internet connection")
-    st.stop()
+Always stay grounded in the database content. Do not hallucinate.
 
-# Chat Interface
+Output your response in the following format:
+<thinking>
+[Your reasoning about the query and what SQL to generate]
+</thinking>
 
-# Welcome message
-if not st.session_state.messages:
-    st.markdown("""
-    
-    """, unsafe_allow_html=True)
+<sql>
+[Your SQL query here]
+</sql>
 
-# Display chat messages
-for i, message in enumerate(st.session_state.messages):
-    if message["role"] == "user":
-        st.markdown(f"""
-        <div class="message-bubble user-bubble">
-            <strong>You</strong><br>
-            {message["content"]}
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.markdown(f"""
-        <div class="message-bubble bot-bubble">
-            <strong>AI Assistant</strong><br>
-            {message["content"]}
-        </div>
-        """, unsafe_allow_html=True)
+<response>
+[Your natural language response to the user]
+</response>
+"""
 
-st.markdown('</div>', unsafe_allow_html=True)
+# Function to extract SQL from LLM response
+def extract_sql(response):
+    sql_match = re.search(r'<sql>(.*?)</sql>', response, re.DOTALL)
+    if sql_match:
+        return sql_match.group(1).strip()
+    return None
 
-# Chat input with enhanced UX
-user_input = st.chat_input("💬 Type your message here... (Press Enter to send)", key="enhanced_chat_input")
-
-if user_input:
-    # Add user message
-    st.session_state.messages.append({"role": "user", "content": user_input})
-    st.session_state.message_count += 1
-    
-    # Show typing indicator
-    typing_placeholder = st.empty()
-    typing_placeholder.markdown("""
-    <div class="typing-indicator">
-        <span>🤖 AI is thinking</span>
-        <div class="typing-dots">
-            <span></span>
-            <span></span>
-            <span></span>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+# Function to execute SQL query and return results as DataFrame
+def execute_sql_query(sql_query):
+    conn = get_db_connection()
+    if conn is None:
+        return None
     
     try:
-        # Prepare messages with system prompt
-        messages_with_system = []
-        if system_prompt.strip():
-            messages_with_system.append({"role": "system", "content": system_prompt})
-        messages_with_system.extend(st.session_state.messages)
+        df = pd.read_sql_query(sql_query, conn)
+        conn.close()
+        return df
+    except Exception as e:
+        st.error(f"Error executing SQL query: {e}")
+        conn.close()
+        return None
+
+# Function to create a map visualization
+def create_map(df):
+    if df is None or df.empty or 'latitude' not in df.columns or 'longitude' not in df.columns:
+        return None
+    
+    # Calculate center of the map
+    center_lat = df['latitude'].mean()
+    center_lon = df['longitude'].mean()
+    
+    # Create map
+    m = folium.Map(location=[center_lat, center_lon], zoom_start=3)
+    
+    # Add markers for each data point
+    for _, row in df.iterrows():
+        # Create popup content
+        popup_content = f"""
+        <b>Float:</b> {row.get('platform_number', 'N/A')}<br>
+        <b>Time:</b> {row.get('measurement_time', 'N/A')}<br>
+        <b>Temp:</b> {row.get('temperature', 'N/A')}°C<br>
+        <b>Salinity:</b> {row.get('salinity', 'N/A')} PSU<br>
+        <b>Pressure:</b> {row.get('pressure', 'N/A')} dbar
+        """
         
-        # API call with enhanced error handling
-        start_time = time.time()
-        chat_completion = client.chat.completions.create(
-            messages=messages_with_system,
-            model=selected_model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            stream=False
-        )
+        # Color code by temperature if available
+        if 'temperature' in df.columns:
+            temp = row.get('temperature', 20)
+            if temp < 10:
+                color = 'blue'
+            elif temp < 20:
+                color = 'green'
+            elif temp < 25:
+                color = 'orange'
+            else:
+                color = 'red'
+        else:
+            color = 'blue'
         
-        response_time = time.time() - start_time
-        response = chat_completion.choices[0].message.content
+        folium.Marker(
+            [row['latitude'], row['longitude']],
+            popup=folium.Popup(popup_content, max_width=300),
+            tooltip=f"Float: {row.get('platform_number', 'N/A')}",
+            icon=folium.Icon(color=color, icon='tint', prefix='fa')
+        ).add_to(m)
+    
+    return m
+
+# Function to generate profile plot
+def create_profile_plot(df):
+    if df is None or df.empty or 'pressure' not in df.columns:
+        return None
+    
+    fig, ax1 = plt.subplots(figsize=(8, 10))
+    
+    # Plot temperature if available
+    if 'temperature' in df.columns:
+        color = 'tab:red'
+        ax1.set_xlabel('Temperature (°C)', color=color)
+        ax1.plot(df['temperature'], df['pressure'], color=color, marker='o', linestyle='-', label='Temperature')
+        ax1.tick_params(axis='x', labelcolor=color)
+        ax1.invert_yaxis()  # Invert y-axis for depth
+    
+    # Create second axis for salinity if available
+    if 'salinity' in df.columns:
+        ax2 = ax1.twiny()
+        color = 'tab:blue'
+        ax2.set_xlabel('Salinity (PSU)', color=color)
+        ax2.plot(df['salinity'], df['pressure'], color=color, marker='s', linestyle='--', label='Salinity')
+        ax2.tick_params(axis='x', labelcolor=color)
+    
+    ax1.set_ylabel('Pressure (dbar)')
+    ax1.grid(True)
+    plt.title('Vertical Profile')
+    
+    # Combine legends
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    if 'salinity' in df.columns:
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
+    else:
+        ax1.legend(loc='upper right')
+    
+    return fig
+
+# Function to generate time series plot
+def create_time_series(df):
+    if df is None or df.empty or 'measurement_time' not in df.columns:
+        return None
+    
+    # Convert to datetime if needed
+    if df['measurement_time'].dtype == 'object':
+        df['measurement_time'] = pd.to_datetime(df['measurement_time'])
+    
+    fig, ax1 = plt.subplots(figsize=(12, 6))
+    
+    # Plot temperature if available
+    if 'temperature' in df.columns:
+        color = 'tab:red'
+        ax1.set_xlabel('Time')
+        ax1.set_ylabel('Temperature (°C)', color=color)
+        ax1.plot(df['measurement_time'], df['temperature'], color=color, marker='o', linestyle='-', label='Temperature')
+        ax1.tick_params(axis='y', labelcolor=color)
+    
+    # Create second axis for salinity if available
+    if 'salinity' in df.columns:
+        ax2 = ax1.twinx()
+        color = 'tab:blue'
+        ax2.set_ylabel('Salinity (PSU)', color=color)
+        ax2.plot(df['measurement_time'], df['salinity'], color=color, marker='s', linestyle='--', label='Salinity')
+        ax2.tick_params(axis='y', labelcolor=color)
+    
+    plt.title('Time Series')
+    plt.grid(True)
+    plt.xticks(rotation=45)
+    
+    # Combine legends
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    if 'salinity' in df.columns:
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
+    else:
+        ax1.legend(loc='upper left')
+    
+    plt.tight_layout()
+    return fig
+
+# Main function to process user queries
+def process_user_query(user_query):
+    # Prepare messages for the LLM
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_query}
+    ]
+    
+    # Get response from LLM
+    try:
+        with st.spinner("Generating SQL query..."):
+            completion = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=messages,
+                temperature=0.1,
+                max_tokens=1024
+            )
         
-        # Clear typing indicator
-        typing_placeholder.empty()
+        llm_response = completion.choices[0].message.content
         
-        # Add assistant response
-        st.session_state.messages.append({"role": "assistant", "content": response})
+        # Extract SQL from response
+        sql_query = extract_sql(llm_response)
         
-        # Show success metrics
-        st.success(f"✅ Response generated in {response_time:.2f}s using {selected_model}")
+        if not sql_query:
+            st.error("I couldn't generate a valid SQL query for your request. Please try rephrasing.")
+            return None, None, None
         
-        st.rerun()
+        st.code(sql_query, language="sql")
+        
+        # Execute the SQL query
+        with st.spinner("Executing query..."):
+            df = execute_sql_query(sql_query)
+        
+        if df is None or df.empty:
+            st.warning("No data found for your query. Please try different parameters.")
+            return None, None, None
+        
+        # Extract the natural language response from LLM
+        response_match = re.search(r'<response>(.*?)</response>', llm_response, re.DOTALL)
+        natural_response = response_match.group(1).strip() if response_match else "Here are the results of your query:"
+        
+        return natural_response, df, sql_query
         
     except Exception as e:
-        typing_placeholder.empty()
-        st.error(f"❌ Error: {str(e)}")
-        st.session_state.messages.pop()  # Remove user message on error
-        
-        if "rate limit" in str(e).lower():
-            st.info("⏰ Rate limit reached. Please wait a moment before sending another message.")
-        elif "api key" in str(e).lower():
-            st.info("🔑 Please check your API key in the sidebar.")
+        st.error(f"Error processing your request: {str(e)}")
+        return None, None, None
 
-# Enhanced Footer
+# Main app
+def main():
+    # Sidebar
+    with st.sidebar:
+        st.title("FloatChat 🌊")
+        st.markdown("ARGO Data Explorer")
+        
+        # Query input
+        user_query = st.text_area(
+            "Enter your query about ARGO data:",
+            height=100,
+            placeholder="e.g., Show me temperature profiles for floats near the equator in the last month"
+        )
+        
+        # Process button
+        process_btn = st.button("Process Query", type="primary")
+        
+        # Example queries
+        st.markdown("### Example Queries")
+        examples = [
+            "Show me the last 10 temperature measurements in the Indian Ocean",
+            "Plot salinity vs pressure for float 2902769",
+            "Which floats recorded the highest temperatures in the last month?",
+            "Show me a map of all float measurements with salinity above 36 PSU"
+        ]
+        
+        for example in examples:
+            if st.button(example, key=example):
+                user_query = example
+                process_btn = True
+    
+    # Main content
+    st.title("ARGO Float Data Dashboard")
+    
+    # Initialize session state
+    if 'results' not in st.session_state:
+        st.session_state.results = None
+    if 'df' not in st.session_state:
+        st.session_state.df = None
+    if 'sql' not in st.session_state:
+        st.session_state.sql = None
+    
+    # Process query if button is clicked
+    if process_btn and user_query:
+        natural_response, df, sql_query = process_user_query(user_query)
+        if df is not None:
+            st.session_state.results = natural_response
+            st.session_state.df = df
+            st.session_state.sql = sql_query
+    
+    # Display results if available
+    if st.session_state.df is not None:
+        # Display natural language response
+        st.markdown("### Results")
+        st.write(st.session_state.results)
+        
+        # Display data
+        st.dataframe(st.session_state.df, use_container_width=True)
+        
+        # Create tabs for different visualizations
+        tab1, tab2, tab3, tab4 = st.tabs(["Map", "Profile", "Time Series", "Raw Data"])
+        
+        with tab1:
+            # Create map
+            st.subheader("Float Locations")
+            map_obj = create_map(st.session_state.df)
+            if map_obj:
+                folium_static(map_obj, width=1000, height=600)
+            else:
+                st.info("No location data available for mapping.")
+        
+        with tab2:
+            # Create profile plot
+            st.subheader("Vertical Profile")
+            profile_fig = create_profile_plot(st.session_state.df)
+            if profile_fig:
+                st.pyplot(profile_fig)
+            else:
+                st.info("No pressure data available for profile plot.")
+        
+        with tab3:
+            # Create time series
+            st.subheader("Time Series")
+            time_fig = create_time_series(st.session_state.df)
+            if time_fig:
+                st.pyplot(time_fig)
+            else:
+                st.info("No time data available for time series plot.")
+        
+        with tab4:
+            # Show raw data
+            st.subheader("Raw Data")
+            st.dataframe(st.session_state.df, use_container_width=True)
+            st.download_button(
+                label="Download data as CSV",
+                data=st.session_state.df.to_csv(index=False),
+                file_name="argo_data.csv",
+                mime="text/csv",
+            )
+    
+    # Display database info
+    with st.expander("Database Information"):
+        conn = get_db_connection()
+        if conn:
+            try:
+                # Get table info
+                table_info = pd.read_sql("""
+                    SELECT column_name, data_type, is_nullable 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'argo_floats'
+                    ORDER BY ordinal_position;
+                """, conn)
+                
+                st.write("Table Schema:")
+                st.dataframe(table_info)
+                
+                # Get some stats
+                row_count = pd.read_sql("SELECT COUNT(*) as count FROM argo_floats;", conn)
+                min_date = pd.read_sql("SELECT MIN(measurement_time) as min_date FROM argo_floats;", conn)
+                max_date = pd.read_sql("SELECT MAX(measurement_time) as max_date FROM argo_floats;", conn)
+                
+                st.write("Database Statistics:")
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Total Records", f"{row_count['count'].iloc[0]:,}")
+                col2.metric("Earliest Measurement", min_date['min_date'].iloc[0].strftime('%Y-%m-%d'))
+                col3.metric("Latest Measurement", max_date['max_date'].iloc[0].strftime('%Y-%m-%d'))
+                
+                conn.close()
+            except Exception as e:
+                st.error(f"Error retrieving database info: {e}")
+
+if __name__ == "__main__":
+    main()
